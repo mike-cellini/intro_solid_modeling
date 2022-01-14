@@ -2,9 +2,11 @@
 //!
 //! Section 2.1.4 recommends storing a collection of line pointers
 //! alongside each point to allow efficient lookup of adjacent line
-//! segments when deleting points. This is a structure of arrays
-//! alternative that allows for more straight-forward that avoids
-//! sticky ownership problems.
+//! segments when deleting points. This is an alternative implementation
+//! utilizing BTreeMaps to store each Point/Line alongside a handle that
+//! can be used to reference it. This avoids sticky borrow checker problems
+//! while also providing a reasonable method for storing/accessing points
+//! in order of creation.
 
 use std::collections::BTreeMap;
 
@@ -24,6 +26,7 @@ pub struct Point {
     lines: Vec<LineHandle>,
 }
 
+/// Represents a handle used to reference a point.
 type PointHandle = usize;
 
 /// A line defined by a reference to the location of the point in the Model structure.
@@ -33,6 +36,7 @@ pub struct Line {
     p2: PointHandle,
 }
 
+/// Represents a handle used to reference a line.
 type LineHandle = usize;
 
 impl Default for Model {
@@ -42,6 +46,7 @@ impl Default for Model {
 }
 
 impl Model {
+    /// Creates a new, empty Model
     pub fn new() -> Self {
         Model {
             points: BTreeMap::new(),
@@ -49,6 +54,7 @@ impl Model {
         }
     }
 
+    /// Add a point to be stored with the model
     pub fn add_point(&mut self, x: i64, y: i64, z: i64, w: i64) -> PointHandle {
         let handle = match self.points.last_key_value() {
             Some((handle, _)) => handle + 1,
@@ -72,6 +78,7 @@ impl Model {
         }
     }
 
+    /// Add a line to be stored with the model
     pub fn add_line(&mut self, p1: PointHandle, p2: PointHandle) -> LineHandle {
         let handle = match self.lines.last_key_value() {
             Some((handle, _)) => handle + 1,
@@ -86,14 +93,17 @@ impl Model {
         handle
     }
 
+    /// Gets all the handles for all lines associated with a point
     pub fn get_point_lines(&self, handle: PointHandle) -> Vec<LineHandle> {
         self.points[&handle].lines.to_vec()
     }
 
+    /// Deletes a line from the model
     pub fn del_line(&mut self, handle: LineHandle) {
         self.lines.remove(&handle);
     }
 
+    /// Deletes a point from the model, also cleans up any associated lines.
     pub fn del_point(&mut self, handle: PointHandle) {
         for &handle in self.get_point_lines(handle).iter() {
             self.lines.remove(&handle);
