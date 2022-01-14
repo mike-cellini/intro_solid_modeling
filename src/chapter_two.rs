@@ -6,51 +6,99 @@
 //! alternative that allows for more straight-forward that avoids
 //! sticky ownership problems.
 
+use std::collections::BTreeMap;
+
 /// A collection of points and lines that define a particular model.
 pub struct Model {
-    pub points: Vec<Point>,
-    pub lines: Vec<Line>,
-    point_lines: Vec<Vec<usize>>,
+    pub points: BTreeMap<PointHandle, Point>,
+    pub lines: BTreeMap<LineHandle, Line>,
 }
 
+/// The homogenous coordinate representation of a point. See section 2.1.1.
 #[derive(Hash, Eq, PartialEq, Debug)]
 pub struct Point {
-    pub x: u64,
-    pub y: u64,
-    pub z: u64,
-    pub w: u64,
+    pub x: i64,
+    pub y: i64,
+    pub z: i64,
+    pub w: i64,
+    lines: Vec<LineHandle>,
 }
 
+type PointHandle = usize;
+
+/// A line defined by a reference to the location of the point in the Model structure.
 #[derive(Eq, PartialEq, Debug)]
 pub struct Line {
-    p1: usize,
-    p2: usize,
+    p1: PointHandle,
+    p2: PointHandle,
+}
+
+type LineHandle = usize;
+
+impl Default for Model {
+    fn default() -> Model {
+        Model::new()
+    }
 }
 
 impl Model {
     pub fn new() -> Self {
         Model {
-            points: Vec::new(),
-            lines: Vec::new(),
-            point_lines: Vec::new(),
+            points: BTreeMap::new(),
+            lines: BTreeMap::new(),
         }
     }
 
-    pub fn add_point(&mut self, x: u64, y: u64, z: u64, w: u64) {
-        self.points.push(Point { x, y, z, w });
-        self.point_lines.push(Vec::new());
+    pub fn add_point(&mut self, x: i64, y: i64, z: i64, w: i64) -> PointHandle {
+        let handle = match self.points.last_key_value() {
+            Some((handle, _)) => handle + 1,
+            None => 1
+        };
+
+        self.points.insert(handle, Point {
+            x,
+            y,
+            z,
+            w,
+            lines: Vec::new(),
+        });
+
+        handle
     }
 
-    pub fn add_line(&mut self, p1_index: usize, p2_index: usize) {
-        let line = Line {
-            p1: p1_index,
-            p2: p2_index,
-        };
-        let i = self.lines.len();
-        self.lines.push(line);
+    fn add_line_to_point(&mut self, point_handle: PointHandle, line_handle: LineHandle) {
+        if let Some(p) = self.points.get_mut(&point_handle) {
+            p.lines.push(line_handle);
+        }
+    }
 
-        self.point_lines[p1_index].push(i);
-        self.point_lines[p2_index].push(i);
+    pub fn add_line(&mut self, p1: PointHandle, p2: PointHandle) -> LineHandle {
+        let handle = match self.lines.last_key_value() {
+            Some((handle, _)) => handle + 1,
+            None => 1};
+
+        let line = Line { p1, p2 };
+        self.lines.insert(handle, line);
+
+        self.add_line_to_point(p1, handle);
+        self.add_line_to_point(p2, handle);
+
+        handle
+    }
+
+    pub fn get_point_lines(&self, handle: PointHandle) -> Vec<LineHandle> {
+        self.points[&handle].lines.to_vec()
+    }
+
+    pub fn del_line(&mut self, handle: LineHandle) {
+        self.lines.remove(&handle);
+    }
+
+    pub fn del_point(&mut self, handle: PointHandle) {
+        for &handle in self.get_point_lines(handle).iter() {
+            self.lines.remove(&handle);
+        }
+        self.points.remove(&handle);
     }
 }
 
@@ -66,38 +114,63 @@ mod test {
 
         assert_eq!(model.points.len(), 0);
         assert_eq!(model.lines.len(), 0);
-        assert_eq!(model.point_lines.len(), 0);
 
-        model.add_point(0, 0, 0, 0);
-        model.add_point(1, 1, 1, 0);
+        let p1 = model.add_point(0, 0, 0, 0);
+        let p2 = model.add_point(1, 1, 1, 0);
 
         assert_eq!(model.points.len(), 2);
         assert_eq!(
-            model.points[0],
+            model.points[&p1],
             Point {
                 x: 0,
                 y: 0,
                 z: 0,
-                w: 0
+                w: 0,
+                lines: Vec::new(),
             }
         );
         assert_eq!(
-            model.points[1],
+            model.points[&p2],
             Point {
                 x: 1,
                 y: 1,
                 z: 1,
-                w: 0
+                w: 0,
+                lines: Vec::new(),
             }
         );
-        assert_eq!(model.point_lines.len(), 2);
-        assert_eq!(model.point_lines[0].len(), 0);
+        assert_eq!(model.lines.len(), 0);
 
-        model.add_line(0, 1);
+        let l1 = model.add_line(p1, p2);
 
         assert_eq!(model.lines.len(), 1);
-        assert_eq!(model.lines[0], Line { p1: 0, p2: 1 });
-        assert_eq!(model.point_lines[0].len(), 1);
-        assert_eq!(model.point_lines[1].len(), 1);
+        assert_eq!(model.lines[&l1], Line { p1, p2 });
+        assert_eq!(model.points[&p1].lines.len(), 1);
+        assert_eq!(model.points[&p2].lines.len(), 1);
+        assert_eq!(model.points[&p1].lines[0], l1);
+        assert_eq!(model.points[&p2].lines[0], l1);
+    }
+
+    #[test]
+    fn del_points_and_line() {
+        use super::Model;
+
+        let mut model = Model::new();
+
+        let p1 = model.add_point(0, 0, 0, 0);
+        let p2 = model.add_point(1, 1, 1, 1);
+        let p3 = model.add_point(2, 2, 2, 2);
+
+        let _l1 = model.add_line(p1, p2);
+        let l2 = model.add_line(p2, p3);
+        
+        model.del_point(p1);
+
+        assert_eq!(model.lines.len(), 1);
+        assert_eq!(model.points.len(), 2);
+
+        model.del_line(l2);
+        assert_eq!(model.lines.len(), 0);
+        assert_eq!(model.points.len(), 2);
     }
 }
